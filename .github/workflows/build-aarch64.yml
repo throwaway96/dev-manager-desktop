@@ -1,0 +1,76 @@
+name: 'Build aarch64'
+run-name: "${{ github.event_name == 'release' && format('Release {0}', github.ref_name) || format('Snapshot {0}', github.sha) }}"
+
+on:
+  workflow_dispatch:
+
+env:
+  TAURI_BUILD_FLAGS: "${{ github.event_name == 'release' && ' ' || '-d' }}"
+
+jobs:
+  build:
+    name: Build Package
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ ubuntu-latest ]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Node Modules
+        uses: actions/cache@v3
+        with:
+          # npm cache files are stored in `~/.npm` on Linux/macOS
+          path: ~/.npm
+          key: ${{ runner.os }}-node_modules-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node_modules
+
+      - name: Install Required Packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: latest
+
+      - name: Install NPM Dependencies
+        run: npm ci
+
+      - name: Build the app
+        run: |
+          rustup target add aarch64-unknown-linux-gnu
+          npm run build -- --features=vendored-openssl ${{ env.TAURI_BUILD_FLAGS }}
+          npm run build -- --features=vendored-openssl --target aarch64-unknown-linux-gnu ${{ env.TAURI_BUILD_FLAGS }}
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ runner.os }}-snapshot
+          path: |
+            src-tauri/target/**/bundle/deb/*.deb
+            src-tauri/target/**/bundle/appimage/*.AppImage
+            src-tauri/target/**/bundle/msi/*.msi
+            src-tauri/target/**/bundle/dmg/*.dmg
+
+      - name: Create Release
+        uses: ncipollo/release-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          name: Linux aarch64 test build (${{ github.ref_name }}, run ${{ github.run_id }})
+          allowUpdates: true
+          omitNameDuringUpdate: true
+          omitBodyDuringUpdate: true
+          omitPrereleaseDuringUpdate: true
+          artifacts: "src-tauri/target/**/bundle/deb/*.deb,\
+            src-tauri/target/**/bundle/appimage/*.AppImage,\
+            src-tauri/target/**/bundle/msi/*.msi,\
+            src-tauri/target/**/bundle/dmg/*.dmg"
